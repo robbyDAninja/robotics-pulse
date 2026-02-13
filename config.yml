@@ -1,3 +1,14 @@
+report:
+  title: "Robotics Pulse"
+  slug: "robotics-pulse"
+  analyst_role: "robotics industry analyst"
+  reader_context: "a busy tech entrepreneur who builds AI agent systems and follows robotics as a strategic interest"
+  frequency_description: "bi-weekly"
+  watch:
+    name: "Figure Watch"
+    tag: "figure_watch"
+    no_news: "No significant Figure AI news this cycle."
+
 feeds:
   - name: "IEEE Spectrum Robotics"
     url: "https://spectrum.ieee.org/rss/robotics/fulltext"

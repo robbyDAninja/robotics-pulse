@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """
-Robotics Pulse — Automated bi-weekly robotics industry intelligence report.
+Pulse — Automated intelligence report generator.
 
-Fetches RSS feeds from top robotics sources, synthesizes them through
-Claude API, and writes a structured markdown report.
+Fetches RSS feeds from configured sources, synthesizes them through
+Claude API, and writes a structured markdown report. All topic-specific
+customization lives in config.yml.
 
 Usage:
     export ANTHROPIC_API_KEY=sk-ant-...
@@ -47,13 +48,13 @@ def parse_entry_date(entry):
     return None
 
 
-def fetch_feed(url, name, max_articles):
+def fetch_feed(url, name, max_articles, user_agent):
     """Fetch and parse a single RSS feed. Returns list of article dicts."""
     try:
         resp = requests.get(
             url,
             timeout=15,
-            headers={"User-Agent": "RoboticsPulse/1.0"},
+            headers={"User-Agent": user_agent},
         )
         resp.raise_for_status()
     except requests.RequestException as e:
@@ -80,25 +81,32 @@ def fetch_feed(url, name, max_articles):
 
 
 def fetch_all_feeds(config):
-    """Fetch all configured feeds. Returns (general_articles, figure_articles)."""
+    """Fetch all configured feeds. Returns (general_articles, watch_articles)."""
+    report = config["report"]
+    watch_cfg = report.get("watch")
+    watch_tag = watch_cfg["tag"] if watch_cfg else None
+
     print("Fetching feeds...")
     general = []
-    figure = []
+    watch = []
     settings = config["settings"]
+    user_agent = f"{report['slug']}/1.0"
 
     for feed_cfg in config["feeds"]:
         articles = fetch_feed(
             feed_cfg["url"],
             feed_cfg["name"],
             settings["max_articles_per_feed"],
+            user_agent,
         )
-        if feed_cfg.get("tag") == "figure_watch":
-            figure.extend(articles)
+        if watch_tag and feed_cfg.get("tag") == watch_tag:
+            watch.extend(articles)
         else:
             general.extend(articles)
 
-    print(f"\n📊 Total: {len(general)} general + {len(figure)} Figure AI articles")
-    return general, figure
+    watch_label = f" + {len(watch)} {watch_cfg['name']}" if watch_cfg else ""
+    print(f"\n📊 Total: {len(general)} general{watch_label} articles")
+    return general, watch
 
 
 def filter_by_date(articles, days):
@@ -134,26 +142,47 @@ def build_date_range(days):
     return f"{start.strftime('%b %d')} – {end.strftime('%b %d, %Y')}"
 
 
-def synthesize_report(general_text, figure_text, date_range, config):
-    """Send articles to Claude API and get the synthesized report."""
-    prompt = f"""You are a concise robotics industry analyst writing a bi-weekly briefing
-for a busy tech entrepreneur. Your reader builds AI agent systems and
-follows robotics as a strategic interest — they want signal, not noise.
+def build_prompt(general_text, watch_text, date_range, config):
+    """Assemble the Claude prompt dynamically from config values."""
+    report = config["report"]
+    title = report["title"]
+    analyst_role = report["analyst_role"]
+    reader_context = report["reader_context"]
+    frequency = report["frequency_description"]
+    watch_cfg = report.get("watch")
 
-Below are articles from the past two weeks gathered from robotics RSS
+    # Watch section in prompt (conditional)
+    if watch_cfg:
+        watch_articles_block = f"""
+
+{watch_cfg['name'].upper()} ARTICLES (for the {watch_cfg['name']} section):
+{watch_text}"""
+
+        watch_section = f"""
+## {watch_cfg['name']}
+[1-2 sentences about {watch_cfg['name']} news from the {watch_cfg['name']} articles above.
+If no {watch_cfg['name']} articles were provided or none are significant, write
+"{watch_cfg['no_news']}"]
+"""
+    else:
+        watch_articles_block = ""
+        watch_section = ""
+
+    return f"""You are a concise {analyst_role} writing a {frequency} briefing
+for {reader_context}. Your reader wants signal, not noise.
+
+Below are articles from the past {frequency} period gathered from RSS
 feeds. Synthesize them into the report format specified below. Be
 opinionated about what matters most. Keep the total report to a 3-5
 minute read.
 
 ARTICLES:
 {general_text}
-
-FIGURE AI ARTICLES (for the Figure Watch section):
-{figure_text}
+{watch_articles_block}
 
 Write the report in this exact markdown format:
 
-# Robotics Pulse — {date_range}
+# {title} — {date_range}
 
 ## Top Signal
 [One paragraph (3-4 sentences) about the single most significant
@@ -164,12 +193,7 @@ industry. Be specific and cite the source.]
 [3-5 items, each formatted exactly as:]
 - **[Headline]** — [2 sentences: what happened + why it matters.
   Include the source name in parentheses.]
-
-## Figure Watch
-[1-2 sentences about Figure AI news from the Figure AI articles above.
-If no Figure AI articles were provided or none are significant, write
-"No significant Figure AI news this cycle."]
-
+{watch_section}
 ## Trend Line
 [One sentence identifying where momentum is shifting across these
 developments. Connect dots between stories when possible.]
@@ -189,6 +213,11 @@ RULES:
 - The Top Signal should be something the reader would want to text a
   colleague about"""
 
+
+def synthesize_report(general_text, watch_text, date_range, config):
+    """Send articles to Claude API and get the synthesized report."""
+    prompt = build_prompt(general_text, watch_text, date_range, config)
+
     settings = config["settings"]
     client = anthropic.Anthropic()
     message = client.messages.create(
@@ -199,11 +228,11 @@ RULES:
     return message.content[0].text
 
 
-def save_report(report_md, report_dir):
+def save_report(report_md, report_dir, slug):
     """Write the report markdown to a dated file."""
     dir_path = SCRIPT_DIR / report_dir
     dir_path.mkdir(exist_ok=True)
-    filename = f"{datetime.now().strftime('%Y-%m-%d')}-robotics-pulse.md"
+    filename = f"{datetime.now().strftime('%Y-%m-%d')}-{slug}.md"
     file_path = dir_path / filename
     file_path.write_text(report_md)
     print(f"\n📝 Report saved: {file_path}")
@@ -218,27 +247,30 @@ def main():
 
     config = load_config()
     settings = config["settings"]
+    report = config["report"]
+    watch_cfg = report.get("watch")
 
-    general, figure = fetch_all_feeds(config)
+    general, watch = fetch_all_feeds(config)
 
     general = filter_by_date(general, settings["lookback_days"])
-    figure = filter_by_date(figure, settings["lookback_days"])
+    watch = filter_by_date(watch, settings["lookback_days"])
 
-    total = len(general) + len(figure)
+    total = len(general) + len(watch)
     if total < 1:
         print("\n⚠️  No articles found in the lookback window. Quiet period — skipping report.")
         return
 
-    print(f"\n🔬 After filtering: {len(general)} general + {len(figure)} Figure AI")
+    watch_label = f" + {len(watch)} {watch_cfg['name']}" if watch_cfg else ""
+    print(f"\n🔬 After filtering: {len(general)} general{watch_label}")
 
     general_text = format_articles_for_prompt(general)
-    figure_text = format_articles_for_prompt(figure)
+    watch_text = format_articles_for_prompt(watch) if watch_cfg else ""
     date_range = build_date_range(settings["lookback_days"])
 
     print("\n🤖 Synthesizing report via Claude...")
-    report_md = synthesize_report(general_text, figure_text, date_range, config)
+    report_md = synthesize_report(general_text, watch_text, date_range, config)
 
-    save_report(report_md, settings["report_dir"])
+    save_report(report_md, settings["report_dir"], report["slug"])
     print("✅ Done!")
 
 
