@@ -1,0 +1,29 @@
+feeds:
+  - name: "IEEE Spectrum Robotics"
+    url: "https://spectrum.ieee.org/rss/robotics/fulltext"
+
+  - name: "The Robot Report"
+    url: "https://www.therobotreport.com/feed/"
+
+  - name: "Robohub"
+    url: "https://robohub.org/feed/"
+
+  - name: "TechCrunch Robotics"
+    url: "https://techcrunch.com/category/robotics/feed/"
+
+  - name: "MIT Technology Review"
+    url: "https://www.technologyreview.com/feed/"
+
+  - name: "Figure AI Watch"
+    url: "https://news.google.com/rss/search?q=%22Figure+AI%22+OR+%22Figure+robotics%22&hl=en-US&gl=US&ceid=US:en"
+    tag: "figure_watch"
+
+  - name: "arXiv Robotics"
+    url: "https://rss.arxiv.org/rss/cs.RO"
+
+settings:
+  lookback_days: 14
+  max_articles_per_feed: 10
+  model: "claude-haiku-4-5-20251001"
+  max_tokens: 2000
+  report_dir: "reports"
